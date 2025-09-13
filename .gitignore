@@ -1,0 +1,11 @@
+# Pastas temporárias e de build
+bin/
+obj/
+.vs/
+
+# Arquivos de usuário
+*.user
+*.suo
+
+# Configurações locais
+*.vscode/
