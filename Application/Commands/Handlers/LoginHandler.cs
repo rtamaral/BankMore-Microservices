@@ -108,7 +108,7 @@ namespace BankMore.Application.Commands.Handlers
                 _logger.LogInformation("StoredHash do banco: '{StoredHash}' (Length: {Length})", storedHash, storedHash.Length);
                 _logger.LogInformation("StoredSalt do banco: '{StoredSalt}' (Length: {Length})", storedSalt, storedSalt?.Length ?? 0);
 
-                // 1. Comparação direta (caso o cliente envie o hash já processado)
+                //Comparação direta (caso o cliente envie o hash já processado)
                 bool directMatch = password == storedHash;
                 _logger.LogInformation("1. Comparação direta: {DirectMatch}", directMatch);
 
@@ -118,7 +118,7 @@ namespace BankMore.Application.Commands.Handlers
                     return true;
                 }
 
-                // 2. Tentar decodificar o storedHash para ver seu conteúdo
+                //Tentar decodificar o storedHash para ver seu conteúdo
                 if (!string.IsNullOrEmpty(storedHash))
                 {
                     try

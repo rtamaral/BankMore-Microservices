@@ -38,8 +38,7 @@ namespace BankMore.Tests.UnitTests.Application.Commands.Handlers
                 .Returns(Task.CompletedTask);
 
             var dbConnectionMock = new Mock<IDbConnection>();
-            // Aqui supomos que seu handler usa Dapper; se usar Moq.Dapper, adicione as chamadas SetupDapperAsync apropriadas.
-            // Se preferir, você pode injetar um IDbConnection real apontando para um DB de teste, ou um stub que implemente as chamadas necessárias.
+            
 
             var loggerMock = new Mock<ILogger<TransferCommandHandler>>();
 
@@ -62,13 +61,12 @@ namespace BankMore.Tests.UnitTests.Application.Commands.Handlers
             // Act
             var result = await handler.Handle(command, CancellationToken.None);
 
-            // Assert (dependendo do que o handler faz com DB real ou fake, esses asserts podem variar)
+            // Assert
             Assert.True(result);
             movementRepoMock.Verify(m => m.CreateMovementAsync(It.IsAny<Movement>()), Times.Exactly(2));
             kafkaProducerMock.Verify(k => k.PublishTransferAsync(
                 It.IsAny<Guid>(), sourceAccountId, destinationAccountId, 100m), Times.Once);
         }
 
-        // Outros testes (ex.: já processada, saldo insuficiente, validações) seguem a mesma linha.
     }
 }

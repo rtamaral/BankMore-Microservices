@@ -3,8 +3,9 @@ using BankMore.Infrastructure.Repositories;
 using Dapper;
 using MediatR;
 using Microsoft.Extensions.Logging;
-using System.Data;
 using Newtonsoft.Json;
+using System.Data;
+using static Microsoft.EntityFrameworkCore.DbLoggerCategory.Database;
 
 namespace BankMore.Application.Commands.Handlers
 {
@@ -28,6 +29,25 @@ namespace BankMore.Application.Commands.Handlers
         {
             try
             {
+                // Validação da IdempotencyKey
+                if (string.IsNullOrWhiteSpace(request.IdempotencyKey))
+                    throw new ArgumentException("IdempotencyKey inválida ou ausente.");
+
+                // Conversão segura da IdempotencyKey para Guid
+                if (!Guid.TryParse(request.IdempotencyKey, out var idempotencyGuid))
+                    throw new ArgumentException("IdempotencyKey inválida ou ausente.");
+
+                // Verifica se já existe movimento com a mesma chave de idempotência
+                var existingIdempotency = await _dbConnection.QueryFirstOrDefaultAsync<Guid?>(
+                    "SELECT chave_idempotencia FROM idempotencia WHERE chave_idempotencia = @IdempotencyKey",
+                    new { IdempotencyKey = idempotencyGuid });
+
+                if (existingIdempotency.HasValue)
+                {
+                    _logger.LogInformation("Movimento já processado. IdempotencyKey={IdempotencyKey}", idempotencyGuid);
+                    return true; // Retorna sucesso sem duplicar
+                }
+
                 // Validação do valor
                 if (request.Value <= 0)
                     throw new ArgumentException("Valor inválido para movimento.");
@@ -35,21 +55,6 @@ namespace BankMore.Application.Commands.Handlers
                 // Validação do tipo
                 if (request.Type != "C" && request.Type != "D")
                     throw new ArgumentException("Tipo de movimento inválido. Deve ser 'C' ou 'D'.");
-
-                // Conversão segura do IdempotencyKey para Guid
-                if (!Guid.TryParse(request.IdempotencyKey, out var idempotencyGuid))
-                    throw new ArgumentException("IdempotencyKey inválida ou ausente.");
-
-                // Verifica se já existe movimento com a mesma chave de idempotência
-                var existing = await _dbConnection.QueryFirstOrDefaultAsync<Guid?>(
-                    "SELECT chave_idempotencia FROM idempotencia WHERE chave_idempotencia = @IdempotencyKey",
-                    new { IdempotencyKey = idempotencyGuid });
-
-                if (existing.HasValue)
-                {
-                    _logger.LogInformation("Movimento já processado. IdempotencyKey={IdempotencyKey}", idempotencyGuid);
-                    return true; // Retorna sucesso sem duplicar
-                }
 
                 // Cria movimento
                 var movement = new Movement
@@ -64,7 +69,7 @@ namespace BankMore.Application.Commands.Handlers
                 await _movementRepository.CreateMovementAsync(movement);
 
                 // Salva na tabela de idempotência
-                string insertIdempotency = @"
+                const string insertIdempotency = @"
             INSERT INTO idempotencia (chave_idempotencia, requisicao, resultado)
             VALUES (@IdempotencyKey, @RequestJson, @ResultJson)";
 
@@ -89,6 +94,7 @@ namespace BankMore.Application.Commands.Handlers
                 throw new InvalidOperationException("Erro ao processar movimento.", ex);
             }
         }
+
 
     }
 }

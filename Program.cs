@@ -17,7 +17,6 @@ using Microsoft.OpenApi.Models;
 using System.Data;
 using System.Text;
 
-
 var builder = WebApplication.CreateBuilder(args);
 
 // ===== Swagger =====
@@ -29,8 +28,8 @@ builder.Services.AddSwaggerGen(c =>
     c.AddSecurityDefinition("Bearer", new OpenApiSecurityScheme
     {
         Name = "Authorization",
-        Type = SecuritySchemeType.ApiKey,
-        Scheme = "Bearer",
+        Type = SecuritySchemeType.Http, // alterado para Http (Bearer)
+        Scheme = "bearer",
         BearerFormat = "JWT",
         In = ParameterLocation.Header,
         Description = "Digite 'Bearer {token}'"
@@ -61,7 +60,6 @@ builder.Services.AddMediatR(cfg =>
     );
 });
 
-
 // ===== Connection Factory e IDbConnection =====
 builder.Services.AddSingleton<SqlServerConnectionFactory>(provider =>
 {
@@ -79,8 +77,6 @@ builder.Services.AddTransient<IDbConnection>(sp =>
 // ===== Serviços =====
 builder.Services.AddSingleton<IPasswordService, PasswordService>();
 builder.Services.AddSingleton<IJwtService, JwtService>();
-builder.Services.AddSingleton<SqlServerConnectionFactory>();
-
 
 // ===== Repositórios =====
 builder.Services.AddScoped<IAccountRepository, AccountRepository>();
@@ -143,6 +139,7 @@ builder.Services.AddAuthentication(options =>
     };
 });
 
+// ===== Build =====
 var app = builder.Build();
 
 // ===== Inicializa Kafka =====
@@ -150,7 +147,7 @@ var kafkaBus = app.Services.CreateKafkaBus();
 await kafkaBus.StartAsync();
 
 // ===== Middleware =====
-// Ativa Swagger em desenvolvimento
+app.UseRouting();
 app.UseSwagger();
 app.UseSwaggerUI(c =>
 {
@@ -158,12 +155,10 @@ app.UseSwaggerUI(c =>
     c.RoutePrefix = string.Empty; // abre Swagger na raiz
 });
 
-
-
-
-app.UseRouting();
+// **UseAuthentication antes de UseAuthorization**
 app.UseAuthentication();
 app.UseAuthorization();
+
 app.MapControllers();
 
 app.Run();

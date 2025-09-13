@@ -1,42 +1,40 @@
-﻿using System.Data;
+﻿using BankMore.Api.Application.Commands;
+using BankMore.Application.Commands;
+using BankMore.Infrastructure.Database;
 using Dapper;
 using MediatR;
-using Microsoft.Extensions.Logging;
-using BankMore.Infrastructure.Database;
+using System.Data;
+using System.Threading;
+using System.Threading.Tasks;
 
-namespace BankMore.Api.Application.Commands.Handlers
+namespace BankMore.Application.Commands.Handlers
 {
     public class DeactivateAccountHandler : IRequestHandler<DeactivateAccountCommand, bool>
     {
         private readonly SqlServerConnectionFactory _connectionFactory;
-        private readonly ILogger<DeactivateAccountHandler> _logger;
+        private readonly IMediator _mediator;
 
-        public DeactivateAccountHandler(SqlServerConnectionFactory connectionFactory, ILogger<DeactivateAccountHandler> logger)
+        public DeactivateAccountHandler(SqlServerConnectionFactory connectionFactory, IMediator mediator)
         {
             _connectionFactory = connectionFactory;
-            _logger = logger;
+            _mediator = mediator;
         }
 
         public async Task<bool> Handle(DeactivateAccountCommand request, CancellationToken cancellationToken)
         {
-            using var connection = _connectionFactory.CreateConnection();
+            // Reaproveita LoginHandler para validar senha
+            var loginResult = await _mediator.Send(new LoginCommand
+            {
+                AccountNumber = request.AccountNumber,
+                Password = request.Password
+            });
 
-            // 1. Verifica se a conta existe e está ativa
-            var conta = await connection.QuerySingleOrDefaultAsync<dynamic>(
-                "SELECT Id, Senha, Ativo FROM ContaCorrente WHERE Id = @Id",
-                new { Id = request.AccountId });
+            if (loginResult == null)
+                throw new UnauthorizedAccessException("Senha inválida.");
 
-            if (conta == null || conta.Ativo == 0)
-                throw new ArgumentException("Conta inválida ou já inativa.", "INVALID_ACCOUNT");
-
-            // 2. Valida a senha
-            if (conta.Senha != request.Password) // aqui você pode aplicar hash/salt se estiver implementado
-                throw new UnauthorizedAccessException("Senha incorreta.");
-
-            // 3. Atualiza para inativo
-            var rows = await connection.ExecuteAsync(
-                "UPDATE ContaCorrente SET Ativo = 0 WHERE Id = @Id",
-                new { Id = request.AccountId });
+            using IDbConnection conn = _connectionFactory.CreateConnection();
+            var sql = "UPDATE contacorrente SET ativo = 0 WHERE numero = @AccountNumber";
+            int rows = await conn.ExecuteAsync(sql, new { request.AccountNumber });
 
             return rows > 0;
         }

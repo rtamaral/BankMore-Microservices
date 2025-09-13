@@ -4,6 +4,7 @@ using BankMore.Api.Application.Shared.DTOs;
 using BankMore.Application.Commands;
 using BankMore.Application.Queries;
 using MediatR;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using System;
@@ -24,6 +25,8 @@ namespace BankMore.Api.Controllers
             _mediator = mediator;
             _logger = logger;
         }
+
+
 
         // GET: api/account/balance
         [HttpGet("balance")]
@@ -145,28 +148,24 @@ namespace BankMore.Api.Controllers
 
         // POST: api/account/deactivate
         [HttpPost("deactivate")]
-        [ProducesResponseType(204)]
-        [ProducesResponseType(400)]
-        [ProducesResponseType(401)]
-        [ProducesResponseType(403)]
-        public async Task<IActionResult> Deactivate([FromBody] DeactivateAccountDto dto)
+        [Authorize(AuthenticationSchemes = JwtBearerDefaults.AuthenticationScheme)]
+        public async Task<IActionResult> DeactivateAccount([FromBody] DeactivateAccountCommand command)
         {
-            var accountIdClaim = User.FindFirst("AccountId")?.Value;
-            if (string.IsNullOrEmpty(accountIdClaim) || !Guid.TryParse(accountIdClaim, out var accountId))
-                return Unauthorized(new { message = "Token inválido ou expirado." });
+            if (command.AccountNumber == 0)
+            {
+                var claim = User.Claims.FirstOrDefault(c => c.Type == "AccountNumber")?.Value;
+                if (!int.TryParse(claim, out int accountNumber))
+                    return Forbid("Token inválido ou expirado.");
 
-            // TODO: Handler deve:
-            // 1. Validar se conta existe e está ativa
-            // 2. Validar senha (hash + salt)
-            // 3. Persistir ativo = 0 em contacorrente
+                command.AccountNumber = accountNumber;
+            }
 
-            var command = new DeactivateAccountCommand(accountId, dto.Password);
-            var success = await _mediator.Send(command);
+            bool success = await _mediator.Send(command);
 
-            if (!success)
-                return BadRequest(new { message = "Não foi possível inativar a conta.", errorType = "INVALID_ACCOUNT" });
+            if (success)
+                return NoContent();
 
-            return NoContent();
+            return BadRequest(new { message = "Não foi possível inativar a conta." });
         }
 
         // POST: api/account/register

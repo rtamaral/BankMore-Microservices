@@ -9,7 +9,7 @@ namespace BankMore.Api.Application.Kafka.Handlers
     {
         public Task Handle(IMessageContext context, TransferKafkaMessage message)
         {
-            // Exemplo simples: aqui você poderia debitar uma tarifa da conta de origem
+            // Debitar uma tarifa da conta de origem
             Console.WriteLine($"[Kafka] Transferência recebida para cobrança de tarifa:");
             Console.WriteLine($"De {message.SourceAccountId} para {message.DestinationAccountId}, valor {message.Value}");
 

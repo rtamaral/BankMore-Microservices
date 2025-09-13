@@ -21,7 +21,7 @@ namespace BankMore.Api.Tests.UnitTests.UnitTests.IntegrationTests
             // Arrange: login para pegar token
             var loginPayload = new
             {
-                AccountNumber = 1234, // Use uma conta válida do seu DB de teste
+                AccountNumber = 1234, // Use uma conta válida do DB de teste
                 Password = "123456"   // Senha correspondente
             };
 
