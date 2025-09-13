@@ -49,7 +49,7 @@ namespace BankMore.Tests.UnitTests.UnitTests
                     new MovementDto { Value = 50, Date = DateTime.UtcNow, Type = "DEBITO" }
                 });
 
-            // Configura a fábrica para retornar o mock de conexão
+            // Configura para retornar o mock de conexão
             factoryMock.Setup(f => f.CreateConnection()).Returns(connectionMock.Object);
 
             // Instancia handler com factory e logger

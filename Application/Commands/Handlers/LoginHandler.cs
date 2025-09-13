@@ -3,6 +3,7 @@ using BankMore.Services;
 using BankMore.Shared.DTOs;
 using Dapper;
 using MediatR;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.Data.SqlClient;
 using Microsoft.Extensions.Logging;
 using System.Data;
@@ -83,6 +84,77 @@ namespace BankMore.Application.Commands.Handlers
             {
                 _logger.LogError(ex, "Erro inesperado ao realizar login da conta {AccountNumber}", request.AccountNumber);
                 throw new InvalidOperationException("Erro inesperado ao realizar login.", ex);
+            }
+        }
+
+        [ApiController]
+        [Route("api/[controller]")]
+        public class DebugController : ControllerBase
+        {
+            private readonly IJwtService _jwtService;
+            private readonly ILogger<DebugController> _logger;
+
+            public DebugController(IJwtService jwtService, ILogger<DebugController> logger)
+            {
+                _jwtService = jwtService;
+                _logger = logger;
+            }
+
+            [HttpPost("decode-token")]
+            public IActionResult DecodeToken([FromBody] string token)
+            {
+                try
+                {
+                    if (string.IsNullOrEmpty(token))
+                    {
+                        return BadRequest("Token não fornecido");
+                    }
+
+                    // Remove "Bearer " se estiver presente
+                    if (token.StartsWith("Bearer "))
+                    {
+                        token = token.Substring(7);
+                    }
+
+                    _logger.LogInformation("Tentando decodificar token...");
+
+                    // Usar seu JwtService para validar
+                    var principal = _jwtService.ValidateToken(token);
+
+                    if (principal == null)
+                    {
+                        _logger.LogWarning("Token inválido ou expirado");
+                        return BadRequest(new { error = "Token inválido ou expirado" });
+                    }
+
+                    var claims = principal.Claims.Select(c => new
+                    {
+                        Type = c.Type,
+                        Value = c.Value
+                    }).ToList();
+
+                    _logger.LogInformation("Token decodificado com sucesso. Claims encontradas: {ClaimsCount}", claims.Count);
+
+                    return Ok(new
+                    {
+                        valid = true,
+                        claims = claims,
+                        identity = principal.Identity?.Name,
+                        isAuthenticated = principal.Identity?.IsAuthenticated
+                    });
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Erro ao decodificar token");
+                    return BadRequest(new { error = ex.Message });
+                }
+            }
+
+            // Endpoint para testar se a API está respondendo
+            [HttpGet("ping")]
+            public IActionResult Ping()
+            {
+                return Ok(new { message = "API está funcionando", timestamp = DateTime.UtcNow });
             }
         }
 

@@ -36,8 +36,8 @@ namespace BankMore.Tests.UnitTests.UnitTests.IntegrationTests
 
             var transferPayload = new
             {
-                SourceAccountId = Guid.NewGuid(),        // substituir pelo ID válido de teste
-                DestinationAccountId = Guid.NewGuid(),   // substituir pelo ID válido de teste
+                SourceAccountId = Guid.NewGuid(),  
+                DestinationAccountId = Guid.NewGuid(),  
                 Value = 50m
             };
 
@@ -68,8 +68,8 @@ namespace BankMore.Tests.UnitTests.UnitTests.IntegrationTests
 
             var transferPayload = new
             {
-                SourceAccountId = Guid.NewGuid(),        // substituir pelo ID válido de teste
-                DestinationAccountId = Guid.NewGuid(),   // substituir pelo ID válido de teste
+                SourceAccountId = Guid.NewGuid(),   
+                DestinationAccountId = Guid.NewGuid(),  
                 Value = 1000000m // valor maior que o saldo
             };
 

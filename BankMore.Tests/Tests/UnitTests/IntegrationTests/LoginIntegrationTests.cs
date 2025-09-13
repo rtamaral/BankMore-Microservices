@@ -22,8 +22,8 @@ namespace BankMore.Api.Tests.UnitTests.UnitTests.IntegrationTests
             // Arrange
             var loginPayload = new
             {
-                AccountNumber = 1234, // Use uma conta válida do DB de teste
-                Password = "123456"   // Senha correspondente (hash gerado no DB)
+                AccountNumber = 1234,
+                Password = "123456" 
             };
 
             // Act

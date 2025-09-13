@@ -33,18 +33,22 @@ namespace BankMore.Services
             {
                 var tokenHandler = new JwtSecurityTokenHandler();
 
-                // Evita renomear claims customizadas (ex: "AccountId" → "nameidentifier")
+                // Evita renomear claims customizadas
                 JwtSecurityTokenHandler.DefaultInboundClaimTypeMap.Clear();
 
                 var key = Encoding.UTF8.GetBytes(_secret);
 
                 var claims = new List<Claim>
-                {
-                    new Claim("idConta", accountId),
-                    new Claim("numero", accountNumber),
-                    new Claim(ClaimTypes.Name, name)
+        {
+            
+                    new Claim("AccountId", accountId),           
+                    new Claim("AccountNumber", accountNumber),     
+                    new Claim("idConta", accountId),             
+                    new Claim("numero", accountNumber),          
+                    new Claim(ClaimTypes.Name, name),
+                    new Claim(ClaimTypes.NameIdentifier, accountId), // Claim padrão
+                    new Claim(JwtRegisteredClaimNames.Sub, accountId) // Claim JWT padrão
                 };
-
 
                 var tokenDescriptor = new SecurityTokenDescriptor
                 {

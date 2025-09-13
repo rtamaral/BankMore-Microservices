@@ -1,0 +1,73 @@
+version: '3.8'
+
+services:
+  bankmore-api:
+    image: bankmore-api
+    container_name: bankmore-api
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8080:80"
+      - "8443:443"
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Development
+      - ASPNETCORE_URLS=https://+:443;http://+:80
+      - ASPNETCORE_Kestrel__Certificates__Default__Password=password
+      - ASPNETCORE_Kestrel__Certificates__Default__Path=/https/aspnetapp.pfx
+    volumes:
+      - ~/.aspnet/https:/https:ro
+    depends_on:
+      - sqlserver
+    networks:
+      - bankmore-network
+
+  # Microserviço (se aplicável)
+  bankmore-microservice:
+    image: bankmore-microservice
+    container_name: bankmore-microservice
+    build:
+      context: ./BankMore-Microservices
+      dockerfile: Dockerfile
+    ports:
+      - "8081:80"
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Development
+    depends_on:
+      - sqlserver
+    networks:
+      - bankmore-network
+
+  # SQL Server Database
+  sqlserver:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    container_name: bankmore-sqlserver
+    environment:
+      - ACCEPT_EULA=Y
+      - SA_PASSWORD=YourStrong@Passw0rd
+      - MSSQL_PID=Express
+    ports:
+      - "1433:1433"
+    volumes:
+      - sqlserver_data:/var/opt/mssql
+    networks:
+      - bankmore-network
+
+  # Redis (para cache, se necessário)
+  redis:
+    image: redis:7-alpine
+    container_name: bankmore-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - bankmore-network
+
+volumes:
+  sqlserver_data:
+  redis_data:
+
+networks:
+  bankmore-network:
+    driver: bridge

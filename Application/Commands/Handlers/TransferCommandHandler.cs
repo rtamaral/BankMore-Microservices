@@ -1,33 +1,34 @@
-﻿using BankMore.Domain.Entities;
+﻿using BankMore.Api.Domain.Entities;
+using BankMore.Domain.Entities;
 using BankMore.Infrastructure.Repositories;
-using BankMore.Api.Infrastructure.Messaging;
 using Dapper;
 using MediatR;
 using Microsoft.Extensions.Logging;
+using System;
 using System.Data;
-using Newtonsoft.Json;
+using System.Threading;
+using System.Threading.Tasks;
 
 namespace BankMore.Application.Commands.Handlers
 {
     public class TransferCommandHandler : IRequestHandler<TransferCommand, bool>
     {
-        private readonly IAccountRepository _accountRepository;
-        private readonly IMovementRepository _movementRepository;
         private readonly IDbConnection _dbConnection;
-        private readonly ITransferKafkaProducer _kafkaProducer;
+        private readonly IMovementRepository _movementRepository;
+        private readonly ITariffRepository _tariffRepository;
         private readonly ILogger<TransferCommandHandler> _logger;
 
+        private const decimal TariffValue = 2m; // Tarifa fixa de 2 reais
+
         public TransferCommandHandler(
-            IAccountRepository accountRepository,
-            IMovementRepository movementRepository,
             IDbConnection dbConnection,
-            ITransferKafkaProducer kafkaProducer,
+            IMovementRepository movementRepository,
+            ITariffRepository tariffRepository,
             ILogger<TransferCommandHandler> logger)
         {
-            _accountRepository = accountRepository ?? throw new ArgumentNullException(nameof(accountRepository));
-            _movementRepository = movementRepository ?? throw new ArgumentNullException(nameof(movementRepository));
             _dbConnection = dbConnection ?? throw new ArgumentNullException(nameof(dbConnection));
-            _kafkaProducer = kafkaProducer ?? throw new ArgumentNullException(nameof(kafkaProducer));
+            _movementRepository = movementRepository ?? throw new ArgumentNullException(nameof(movementRepository));
+            _tariffRepository = tariffRepository ?? throw new ArgumentNullException(nameof(tariffRepository));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         }
 
@@ -35,8 +36,9 @@ namespace BankMore.Application.Commands.Handlers
         {
             try
             {
-                if (request.Value <= 0)
-                    throw new ArgumentException("Valor da transferência deve ser positivo.");
+                // Gera IdempotencyKey se não vier
+                if (string.IsNullOrWhiteSpace(request.IdempotencyKey))
+                    request.IdempotencyKey = Guid.NewGuid().ToString();
 
                 if (!Guid.TryParse(request.IdempotencyKey, out var idempotencyGuid))
                     throw new ArgumentException("IdempotencyKey inválida ou ausente.");
@@ -48,23 +50,27 @@ namespace BankMore.Application.Commands.Handlers
 
                 if (existing.HasValue)
                 {
-                    _logger.LogInformation("Transferência já processada. IdempotencyKey={IdempotencyKey}", idempotencyGuid);
-                    return true;
+                    _logger.LogWarning(
+                        "Transferência duplicada detectada. IdempotencyKey={IdempotencyKey}, SourceAccountId={SourceAccountId}, DestinationAccountId={DestinationAccountId}",
+                        idempotencyGuid, request.SourceAccountId, request.DestinationAccountId);
+
+                    return false; // Não processa novamente
                 }
 
                 // Consulta saldo da conta de origem
                 var saldo = await _dbConnection.QueryFirstOrDefaultAsync<decimal>(
                     @"SELECT 
-                        ISNULL(SUM(CASE WHEN tipomovimento = 'C' THEN valor ELSE 0 END), 0)
-                        - ISNULL(SUM(CASE WHEN tipomovimento = 'D' THEN valor ELSE 0 END), 0) AS Saldo
-                      FROM movimentacao
+                        ISNULL(SUM(CASE WHEN tipomovimento = 'C' THEN valor ELSE 0 END),0)
+                        - ISNULL(SUM(CASE WHEN tipomovimento = 'D' THEN valor ELSE 0 END),0) AS Saldo
+                      FROM movimento
                       WHERE idcontacorrente = @AccountId",
                     new { AccountId = request.SourceAccountId });
 
-                if (saldo < request.Value)
-                    throw new ArgumentException("Saldo insuficiente na conta de origem.");
+                var totalDebit = request.Value + TariffValue;
+                if (saldo < totalDebit)
+                    throw new InvalidOperationException("Saldo insuficiente para transferência e tarifa.");
 
-                // Criar movimentos
+                // Movimentos
                 var debitMovement = new Movement
                 {
                     Id = Guid.NewGuid(),
@@ -73,7 +79,6 @@ namespace BankMore.Application.Commands.Handlers
                     Value = request.Value,
                     CreatedAt = DateTime.UtcNow
                 };
-
                 var creditMovement = new Movement
                 {
                     Id = Guid.NewGuid(),
@@ -82,14 +87,25 @@ namespace BankMore.Application.Commands.Handlers
                     Value = request.Value,
                     CreatedAt = DateTime.UtcNow
                 };
+                var tariffMovement = new Movement
+                {
+                    Id = Guid.NewGuid(),
+                    AccountId = request.SourceAccountId,
+                    Type = "D",
+                    Value = TariffValue,
+                    CreatedAt = DateTime.UtcNow
+                };
 
                 await _movementRepository.CreateMovementAsync(debitMovement);
                 await _movementRepository.CreateMovementAsync(creditMovement);
+                await _movementRepository.CreateMovementAsync(tariffMovement);
 
-                // Registrar transferência
-                string insertTransfer = @"
-                    INSERT INTO transferencia (idtransferencia, idcontacorrente_origem, idcontacorrente_destino, datamovimento, valor)
-                    VALUES (@Id, @SourceAccountId, @DestinationAccountId, @Date, @Value)";
+                // Salva transferência
+                const string insertTransfer = @"
+                    INSERT INTO transferencia
+                        (idtransferencia, idcontacorrente_origem, idcontacorrente_destino, datamovimento, valor)
+                    VALUES
+                        (@Id, @SourceAccountId, @DestinationAccountId, @Date, @Value)";
                 await _dbConnection.ExecuteAsync(insertTransfer, new
                 {
                     Id = idempotencyGuid,
@@ -99,40 +115,37 @@ namespace BankMore.Application.Commands.Handlers
                     Value = request.Value
                 });
 
-                // Salvar idempotência
-                string insertIdempotency = @"
+                // Salva tarifa na tabela tarifa
+                var tariff = new Tariff
+                {
+                    IdTarifa = Guid.NewGuid(),
+                    IdContaCorrente = request.SourceAccountId,
+                    DataMovimento = DateTime.UtcNow,
+                    Valor = TariffValue
+                };
+                await _tariffRepository.CreateTariffAsync(tariff);
+
+                // Salva idempotência
+                const string insertIdempotency = @"
                     INSERT INTO idempotencia (chave_idempotencia, requisicao, resultado)
                     VALUES (@IdempotencyKey, @RequestJson, @ResultJson)";
                 await _dbConnection.ExecuteAsync(insertIdempotency, new
                 {
                     IdempotencyKey = idempotencyGuid,
-                    RequestJson = JsonConvert.SerializeObject(request),
-                    ResultJson = JsonConvert.SerializeObject(new { Success = true })
+                    RequestJson = Newtonsoft.Json.JsonConvert.SerializeObject(request),
+                    ResultJson = Newtonsoft.Json.JsonConvert.SerializeObject(new { Success = true })
                 });
 
-                // Publicar Kafka
-                await _kafkaProducer.PublishTransferAsync(
-                    idempotencyGuid,
-                    request.SourceAccountId,
-                    request.DestinationAccountId,
-                    request.Value
-                );
-
-                _logger.LogInformation(
-                    "Transferência processada com sucesso: IdempotencyKey={IdempotencyKey}, Valor={Value}",
-                    idempotencyGuid, request.Value);
+                _logger.LogInformation("Transferência e tarifa registradas com sucesso. Source={Source}, Destination={Destination}, Valor={Value}, Tarifa={Tarifa}",
+                    request.SourceAccountId, request.DestinationAccountId, request.Value, TariffValue);
 
                 return true;
             }
-            catch (ArgumentException ex)
-            {
-                _logger.LogWarning(ex, "Erro de validação na transferência.");
-                throw;
-            }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Erro inesperado ao processar transferência.");
-                throw new InvalidOperationException("Erro ao processar transferência.", ex);
+                _logger.LogError(ex, "Erro ao processar transferência e registrar tarifa. Source={Source}, Destination={Destination}, Valor={Value}",
+                    request.SourceAccountId, request.DestinationAccountId, request.Value);
+                throw;
             }
         }
     }

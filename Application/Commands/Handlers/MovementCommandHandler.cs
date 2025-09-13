@@ -5,7 +5,6 @@ using MediatR;
 using Microsoft.Extensions.Logging;
 using Newtonsoft.Json;
 using System.Data;
-using static Microsoft.EntityFrameworkCore.DbLoggerCategory.Database;
 
 namespace BankMore.Application.Commands.Handlers
 {
@@ -33,7 +32,6 @@ namespace BankMore.Application.Commands.Handlers
                 if (string.IsNullOrWhiteSpace(request.IdempotencyKey))
                     throw new ArgumentException("IdempotencyKey inválida ou ausente.");
 
-                // Conversão segura da IdempotencyKey para Guid
                 if (!Guid.TryParse(request.IdempotencyKey, out var idempotencyGuid))
                     throw new ArgumentException("IdempotencyKey inválida ou ausente.");
 
@@ -44,17 +42,24 @@ namespace BankMore.Application.Commands.Handlers
 
                 if (existingIdempotency.HasValue)
                 {
-                    _logger.LogInformation("Movimento já processado. IdempotencyKey={IdempotencyKey}", idempotencyGuid);
-                    return true; // Retorna sucesso sem duplicar
+                    _logger.LogWarning(
+                        "IdempotencyKey já utilizada. IdempotencyKey={IdempotencyKey}, AccountId={AccountId}",
+                        idempotencyGuid, request.AccountId);
+
+                    // Retorna false para indicar que o movimento não será criado novamente
+                    return false;
                 }
 
                 // Validação do valor
                 if (request.Value <= 0)
                     throw new ArgumentException("Valor inválido para movimento.");
 
-                // Validação do tipo
-                if (request.Type != "C" && request.Type != "D")
+                if (!request.Type.Equals("C", StringComparison.OrdinalIgnoreCase) &&
+                        !request.Type.Equals("D", StringComparison.OrdinalIgnoreCase))
+                {
                     throw new ArgumentException("Tipo de movimento inválido. Deve ser 'C' ou 'D'.");
+                }
+
 
                 // Cria movimento
                 var movement = new Movement
@@ -70,8 +75,8 @@ namespace BankMore.Application.Commands.Handlers
 
                 // Salva na tabela de idempotência
                 const string insertIdempotency = @"
-            INSERT INTO idempotencia (chave_idempotencia, requisicao, resultado)
-            VALUES (@IdempotencyKey, @RequestJson, @ResultJson)";
+                    INSERT INTO idempotencia (chave_idempotencia, requisicao, resultado)
+                    VALUES (@IdempotencyKey, @RequestJson, @ResultJson)";
 
                 await _dbConnection.ExecuteAsync(insertIdempotency, new
                 {
@@ -80,21 +85,24 @@ namespace BankMore.Application.Commands.Handlers
                     ResultJson = JsonConvert.SerializeObject(new { Success = true })
                 });
 
-                _logger.LogInformation("Movimento processado com sucesso. IdempotencyKey={IdempotencyKey}", idempotencyGuid);
+                _logger.LogInformation(
+                    "Movimento processado com sucesso. IdempotencyKey={IdempotencyKey}, AccountId={AccountId}",
+                    idempotencyGuid, request.AccountId);
+
                 return true;
             }
             catch (ArgumentException ex)
             {
-                _logger.LogWarning(ex, "Erro de validação no movimento. AccountId={AccountId}", request.AccountId);
+                _logger.LogWarning(
+                    ex, "Erro de validação no movimento. AccountId={AccountId}", request.AccountId);
                 throw;
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Erro inesperado ao processar movimento. AccountId={AccountId}", request.AccountId);
+                _logger.LogError(
+                    ex, "Erro inesperado ao processar movimento. AccountId={AccountId}", request.AccountId);
                 throw new InvalidOperationException("Erro ao processar movimento.", ex);
             }
         }
-
-
     }
 }

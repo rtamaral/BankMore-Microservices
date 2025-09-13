@@ -1,72 +1,124 @@
-﻿using System;
+﻿using BankMore.Api.Domain.Entities;
+using BankMore.Api.Infrastructure.Messaging;
+using BankMore.Application.Commands;
+using BankMore.Application.Commands.Handlers;
+using BankMore.Domain.Entities;
+using BankMore.Infrastructure.Repositories;
+using Dapper;
+using Microsoft.Extensions.Logging;
+using Moq;
+using Moq.Dapper;
+using Newtonsoft.Json;
+using System;
 using System.Data;
 using System.Threading;
 using System.Threading.Tasks;
-using Moq;
 using Xunit;
-using Microsoft.Extensions.Logging;
-using BankMore.Application.Commands;
-using BankMore.Application.Commands.Handlers;
-using BankMore.Infrastructure.Repositories;
-using BankMore.Domain.Entities;
-using BankMore.Api.Infrastructure.Messaging;
 
 namespace BankMore.Tests.UnitTests.Application.Commands.Handlers
 {
     public class TransferCommandHandlerTests
     {
-        private readonly Guid sourceAccountId = Guid.NewGuid();
-        private readonly Guid destinationAccountId = Guid.NewGuid();
-        private readonly Guid idempotencyKey = Guid.NewGuid();
+        private readonly Mock<IMovementRepository> _movementRepositoryMock = new();
+        private readonly Mock<ITariffRepository> _tariffRepositoryMock = new();
+        private readonly Mock<IDbConnection> _dbConnectionMock = new();
+        private readonly Mock<ILogger<TransferCommandHandler>> _loggerMock = new();
+        private readonly Mock<ITransferKafkaProducer> _kafkaProducerMock = new();
+
+        private TransferCommandHandler CreateHandler()
+        {
+            return new TransferCommandHandler(
+                _dbConnectionMock.Object,
+                _movementRepositoryMock.Object,
+                _tariffRepositoryMock.Object,
+                _loggerMock.Object);
+        }
 
         [Fact]
-        public async Task Handle_Should_Process_Transfer_When_Not_Exists()
+        public async Task Handle_ShouldProcessTransferAndTariff_WhenValidRequest()
         {
             // Arrange
-            var movementRepoMock = new Mock<IMovementRepository>();
-            movementRepoMock.Setup(m => m.CreateMovementAsync(It.IsAny<Movement>()))
+            var request = new TransferCommand
+            {
+                SourceAccountId = Guid.NewGuid(),
+                DestinationAccountId = Guid.NewGuid(),
+                Value = 100m,
+                IdempotencyKey = Guid.NewGuid().ToString()
+            };
+
+            decimal initialBalance = 200m;
+            decimal tariffValue = 2m; // Tarifa fixa
+
+            // Mock saldo
+            _dbConnectionMock.SetupDapperAsync(c => c.QueryFirstOrDefaultAsync<decimal>(
+                It.IsAny<string>(), It.IsAny<object>(), null, null, null))
+                .ReturnsAsync(initialBalance);
+
+            // Mock idempotência inexistente
+            _dbConnectionMock.SetupDapperAsync(c => c.QueryFirstOrDefaultAsync<Guid?>(
+                It.IsAny<string>(), It.IsAny<object>(), null, null, null))
+                .ReturnsAsync((Guid?)null);
+
+            _dbConnectionMock.SetupDapperAsync(c => c.ExecuteAsync(
+                It.IsAny<string>(), It.IsAny<object>(), null, null, null))
                 .ReturnsAsync(1);
 
-            var transferRepoMock = new Mock<ITransferRepository>();
+            _dbConnectionMock.SetupDapperAsync(c => c.ExecuteAsync(
+                It.IsAny<string>(), It.IsAny<object>(), null, null, null))
+                .ReturnsAsync(1); 
 
-            var kafkaProducerMock = new Mock<ITransferKafkaProducer>();
-            kafkaProducerMock.Setup(k => k.PublishTransferAsync(
-                It.IsAny<Guid>(),
-                It.IsAny<Guid>(),
-                It.IsAny<Guid>(),
-                It.IsAny<decimal>()))
+
+            _tariffRepositoryMock.Setup(t => t.CreateTariffAsync(It.IsAny<Tariff>()))
                 .Returns(Task.CompletedTask);
 
-            var dbConnectionMock = new Mock<IDbConnection>();
-            
+            var handler = CreateHandler();
 
-            var loggerMock = new Mock<ILogger<TransferCommandHandler>>();
+            // Act
+            var result = await handler.Handle(request, CancellationToken.None);
 
-            var handler = new TransferCommandHandler(
-                Mock.Of<IAccountRepository>(),    // account repo (pode ser Mock.Of)
-                movementRepoMock.Object,
-                dbConnectionMock.Object,
-                kafkaProducerMock.Object,
-                loggerMock.Object
-            );
+            // Assert
+            Assert.True(result);
 
-            var command = new TransferCommand
+            // Movimentos de transferência
+            _movementRepositoryMock.Verify(m => m.CreateMovementAsync(It.Is<Movement>(mov =>
+                mov.AccountId == request.SourceAccountId && mov.Type == "D" && mov.Value == request.Value)), Times.Once);
+
+            _movementRepositoryMock.Verify(m => m.CreateMovementAsync(It.Is<Movement>(mov =>
+                mov.AccountId == request.DestinationAccountId && mov.Type == "C" && mov.Value == request.Value)), Times.Once);
+
+            // Movimentos de tarifa
+            _movementRepositoryMock.Verify(m => m.CreateMovementAsync(It.Is<Movement>(mov =>
+                mov.AccountId == request.SourceAccountId && mov.Type == "D" && mov.Value == tariffValue)), Times.Once);
+
+            // Tarifa registrada
+            _tariffRepositoryMock.Verify(t => t.CreateTariffAsync(It.Is<Tariff>(tar =>
+                tar.IdContaCorrente == request.SourceAccountId && tar.Valor == tariffValue)), Times.Once);
+        }
+
+        [Fact]
+        public async Task Handle_ShouldReturnFalse_WhenIdempotencyKeyExists()
+        {
+            // Arrange
+            var idempotencyKey = Guid.NewGuid();
+            var request = new TransferCommand
             {
-                SourceAccountId = sourceAccountId,
-                DestinationAccountId = destinationAccountId,
+                SourceAccountId = Guid.NewGuid(),
+                DestinationAccountId = Guid.NewGuid(),
                 Value = 100m,
                 IdempotencyKey = idempotencyKey.ToString()
             };
 
+            _dbConnectionMock.SetupDapperAsync(c => c.QueryFirstOrDefaultAsync<Guid?>(
+                It.IsAny<string>(), It.IsAny<object>(), null, null, null))
+                .ReturnsAsync(idempotencyKey);
+
+            var handler = CreateHandler();
+
             // Act
-            var result = await handler.Handle(command, CancellationToken.None);
+            var result = await handler.Handle(request, CancellationToken.None);
 
             // Assert
-            Assert.True(result);
-            movementRepoMock.Verify(m => m.CreateMovementAsync(It.IsAny<Movement>()), Times.Exactly(2));
-            kafkaProducerMock.Verify(k => k.PublishTransferAsync(
-                It.IsAny<Guid>(), sourceAccountId, destinationAccountId, 100m), Times.Once);
+            Assert.False(result);
         }
-
     }
 }

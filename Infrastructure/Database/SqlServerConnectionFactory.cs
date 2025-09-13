@@ -8,14 +8,12 @@ namespace BankMore.Infrastructure.Database
     {
         private readonly string _connectionString;
 
-        // Construtor que aceita IConfiguration (seu código atual)
         public SqlServerConnectionFactory(IConfiguration configuration)
         {
             _connectionString = configuration.GetConnectionString("DefaultConnection")
                 ?? throw new InvalidOperationException("Connection string 'DefaultConnection' not found.");
         }
 
-        // Construtor alternativo que aceita string diretamente
         public SqlServerConnectionFactory(string connectionString)
         {
             _connectionString = connectionString ?? throw new ArgumentNullException(nameof(connectionString));

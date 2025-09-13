@@ -25,7 +25,7 @@ namespace BankMore.Infrastructure.Repositories.Impl
         public async Task<Account?> GetByCpfAsync(string cpf)
         {
             using IDbConnection db = _connectionFactory.CreateConnection();
-            string sql = "SELECT * FROM contacorrente WHERE nome = @Cpf"; // ajustar se CPF for coluna separada
+            string sql = "SELECT * FROM contacorrente WHERE nome = @Cpf";
             return await db.QueryFirstOrDefaultAsync<Account>(sql, new { Cpf = cpf });
         }
 
