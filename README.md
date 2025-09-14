@@ -143,8 +143,6 @@ dotnet run
 
 ## 🚀 Executando o Sistema Completo
 
-## 🚀 Executando o Sistema Completo
-
 ### **Ordem de Inicialização:**
 
 1. **🗄️ SQL Server** (deve estar rodando)
